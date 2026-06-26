@@ -1,0 +1,24 @@
+# Python
+.env
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.ruff_cache/
+dist/
+*.egg-info/
+.venv/
+.uv/
+
+# TypeScript
+integrations/node_modules/
+integrations/dist/
+
+# 工作区临时文件
+/tmp/
+*.patch.tmp
+
+# IDE
+.vscode/
+.idea/
+*.swp
