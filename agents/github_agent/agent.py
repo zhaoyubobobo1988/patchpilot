@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+import tempfile
 from pathlib import Path
 
 import httpx
@@ -14,6 +15,10 @@ from models.patch import MergedPatch
 from models.task import FeatureTask
 
 logger = get_logger(__name__)
+
+
+class MergeConflictError(RuntimeError):
+    """Raised when Worker patches conflict on the same hunk and cannot be auto-resolved."""
 
 _GH_API = "https://api.github.com"
 
@@ -161,33 +166,103 @@ class GitHubAgent:
     # ── 内部工具 ──────────────────────────────────────────────────────────────
 
     def _collect_worker_changes(self, main_workspace: Path, task: FeatureTask) -> None:
-        """将各 Worker 独立 workspace 的变更文件复制回主 workspace。"""
-        import shutil
+        """Apply Worker patches to *main_workspace* via git apply.
+
+        Each Worker workspace's staged diff is extracted and applied with
+        ``git apply --3way`` so that non-overlapping edits to the same file
+        merge cleanly.  Overlapping hunks that cannot be resolved automatically
+        raise MergeConflictError instead of silently overwriting one worker's
+        changes with another's.
+        """
         parent = main_workspace.parent
-        copied = 0
-        for ws_dir in parent.iterdir():
-            # Worker workspace 命名规则：{run_id}-{worker_id}
-            name = ws_dir.name
-            run_id = main_workspace.name
-            if not name.startswith(run_id + "-") or not ws_dir.is_dir():
+        run_id = main_workspace.name
+        applied = 0
+        conflict_details: list[str] = []
+
+        for ws_dir in sorted(parent.iterdir()):
+            if not ws_dir.is_dir() or not ws_dir.name.startswith(run_id + "-"):
                 continue
-            # 枚举该 Worker workspace 中有变更的文件
-            result = subprocess.run(
-                ["git", "diff", "--cached", "--name-only"],
+
+            # Stage any edits the Worker left uncommitted
+            subprocess.run(
+                ["git", "add", "-A"],
                 cwd=ws_dir,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
             )
-            for rel_path in result.stdout.strip().splitlines():
-                src = ws_dir / rel_path
-                dst = main_workspace / rel_path
-                if src.exists():
-                    dst.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(src, dst)
-                    copied += 1
-        logger.info(f"Collected {copied} changed files from worker workspaces")
+
+            diff_proc = subprocess.run(
+                ["git", "diff", "--cached"],
+                cwd=ws_dir,
+                capture_output=True,  # raw bytes — avoid any CRLF translation
+            )
+            patch_bytes = diff_proc.stdout
+            if not patch_bytes.strip():
+                logger.info(f"Worker {ws_dir.name}: no staged changes, skipping")
+                continue
+            # Ensure patch ends with a newline — git apply rejects truncated patches
+            if not patch_bytes.endswith(b"\n"):
+                patch_bytes += b"\n"
+
+            with tempfile.NamedTemporaryFile(
+                mode="wb", suffix=".patch", delete=False
+            ) as f:
+                f.write(patch_bytes)
+                patch_path = Path(f.name)
+
+            try:
+                # Attempt a clean apply first (no context fuzz needed)
+                check = subprocess.run(
+                    ["git", "apply", "--check", str(patch_path)],
+                    cwd=main_workspace,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+                if check.returncode == 0:
+                    subprocess.run(
+                        ["git", "apply", str(patch_path)],
+                        cwd=main_workspace,
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        check=True,
+                    )
+                    applied += 1
+                    logger.info(f"Applied patch from {ws_dir.name} (clean)")
+                else:
+                    # Context shifted — try 3-way merge
+                    apply3 = subprocess.run(
+                        ["git", "apply", "--3way", str(patch_path)],
+                        cwd=main_workspace,
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                    )
+                    if apply3.returncode == 0:
+                        applied += 1
+                        logger.info(f"Applied patch from {ws_dir.name} (3-way merge)")
+                    else:
+                        detail = (apply3.stderr or apply3.stdout or "").strip()[:300]
+                        conflict_details.append(f"{ws_dir.name}: {detail}")
+                        logger.error(
+                            f"Merge conflict in {ws_dir.name}: {detail}"
+                        )
+            finally:
+                patch_path.unlink(missing_ok=True)
+
+        if conflict_details:
+            raise MergeConflictError(
+                f"{len(conflict_details)} worker patch(es) could not be applied: "
+                + " | ".join(conflict_details)
+            )
+
+        logger.info(f"Applied patches from {applied} worker workspace(s)")
 
     def _headers(self) -> dict[str, str]:
         return {

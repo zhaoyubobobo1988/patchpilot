@@ -17,6 +17,11 @@ integrations/dist/
 # 工作区临时文件
 /tmp/
 *.patch.tmp
+pdf_out.txt
+
+# 文档（不入库）
+*.pdf
+*.docx
 
 # IDE
 .vscode/
