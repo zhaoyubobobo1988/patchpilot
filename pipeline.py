@@ -24,6 +24,7 @@ from models.github import CIStatus, DebugContext
 from models.patch import PatchResult, PatchSet, PatchStatus, QualityGateResult
 from models.task import FeatureTask, SubTask, TaskStatus
 
+from persistence.run_state import save_run_state
 from telemetry.execution_log import ExecutionRecord, record_execution
 from agents.context_agent.agent import ContextAgent
 from agents.orchestrator.agent import OrchestratorAgent
@@ -273,6 +274,7 @@ async def run_pipeline(
 
     # ── Stage 0: Clone 目标仓库到 workspace ─────────────────────────────────────
     run.stage = "clone"
+    save_run_state(run, settings.WORKSPACE_BASE_PATH)
     logger.info(f"[{run_id}] Stage: clone  {repository}")
     _clone_repo(ctx.workspace_path, repository)
 
@@ -298,6 +300,7 @@ async def run_pipeline(
 
     # ── Stage 1: ContextAgent — 扫描仓库，提取相关文件和代码模式 ────────────────
     run.stage = "context"
+    save_run_state(run, settings.WORKSPACE_BASE_PATH)
     logger.info(f"[{run_id}] Stage: context")
     context_agent = ContextAgent(ctx)
     code_context = await context_agent.gather(task, ctx.workspace_path)
@@ -334,11 +337,13 @@ async def run_pipeline(
 
     # ── Stage 3: Worker — 并行生成 patch ────────────────────────────────────────
     run.stage = "worker"
+    save_run_state(run, settings.WORKSPACE_BASE_PATH)
     logger.info(f"[{run_id}] Stage: worker")
     all_patches = await _run_workers(task_graph, ctx, label="worker")
 
     # ── Stage 4: AggregatorAgent — 合并 patch ────────────────────────────────────
     run.stage = "aggregate"
+    save_run_state(run, settings.WORKSPACE_BASE_PATH)
     logger.info(f"[{run_id}] Stage: aggregate ({len(all_patches)} patches)")
     aggregator = AggregatorAgent(ctx)
     integrator = IntegratorAgent(ctx)
@@ -422,6 +427,7 @@ async def run_pipeline(
 
     # ── Stage 6: GitHubAgent — 创建 PR ──────────────────────────────────────────
     run.stage = "github"
+    save_run_state(run, settings.WORKSPACE_BASE_PATH)
     logger.info(f"[{run_id}] Stage: github")
     github_agent = GitHubAgent(ctx)
     pr_request = await github_agent.apply_and_push(merged, task)
@@ -432,6 +438,7 @@ async def run_pipeline(
 
     # ── Stage 7: CI 轮询 + DebugAgent 重试循环 ───────────────────────────────────
     run.stage = "ci"
+    save_run_state(run, settings.WORKSPACE_BASE_PATH)
     debug_agent = DebugAgent(ctx)
     current_merged = merged
 
