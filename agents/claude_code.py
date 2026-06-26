@@ -15,6 +15,7 @@ from collections.abc import Mapping
 
 from config.logging import get_logger
 from config.settings import settings
+from models.events import AgentEvent, AgentEventKind
 from .base import AgentAdapter, AgentResult, AgentTask
 
 logger = get_logger(__name__)
@@ -50,6 +51,14 @@ class ClaudeCodeAgent:
         process: asyncio.subprocess.Process | None = None
         start = time.monotonic()
         result: AgentResult  # set in every branch; recorded before return
+
+        events: list[AgentEvent] = [
+            AgentEvent(
+                kind=AgentEventKind.STARTED,
+                agent_id=task.task_id,
+                payload={"role": task.role},
+            )
+        ]
 
         try:
             env = self._build_env()
@@ -90,20 +99,32 @@ class ClaudeCodeAgent:
             )
 
             if exit_code != 0:
+                events.append(AgentEvent(
+                    kind=AgentEventKind.FAILED,
+                    agent_id=task.task_id,
+                    payload={"exit_code": exit_code},
+                ))
                 result = AgentResult(
                     success=False,
                     output="",
                     exit_code=exit_code,
                     error=stderr_text[:400] or f"claude CLI exited {exit_code}",
                     metadata=self._meta(task, elapsed),
+                    events=events,
                 )
             else:
                 output = self._parse_output(stdout_text, task.output_format)
+                events.append(AgentEvent(
+                    kind=AgentEventKind.COMPLETED,
+                    agent_id=task.task_id,
+                    payload={"elapsed": round(elapsed, 2)},
+                ))
                 result = AgentResult(
                     success=True,
                     output=output,
                     exit_code=0,
                     metadata=self._meta(task, elapsed),
+                    events=events,
                 )
 
         except asyncio.TimeoutError:
@@ -115,12 +136,18 @@ class ClaudeCodeAgent:
                 f"[ClaudeCodeAgent] task_id={task.task_id} role={task.role} "
                 f"TIMEOUT after {elapsed:.1f}s (limit={task.timeout_seconds}s)"
             )
+            events.append(AgentEvent(
+                kind=AgentEventKind.FAILED,
+                agent_id=task.task_id,
+                payload={"reason": f"timeout after {task.timeout_seconds}s"},
+            ))
             result = AgentResult(
                 success=False,
                 output="",
                 exit_code=-1,
                 error=f"claude CLI timed out after {task.timeout_seconds}s",
                 metadata=self._meta(task, elapsed),
+                events=events,
             )
 
         except Exception as exc:
@@ -132,12 +159,18 @@ class ClaudeCodeAgent:
                 f"[ClaudeCodeAgent] task_id={task.task_id} role={task.role} "
                 f"ERROR {type(exc).__name__}: {exc}"
             )
+            events.append(AgentEvent(
+                kind=AgentEventKind.FAILED,
+                agent_id=task.task_id,
+                payload={"reason": f"{type(exc).__name__}: {exc}"},
+            ))
             result = AgentResult(
                 success=False,
                 output="",
                 exit_code=-1,
                 error=f"{type(exc).__name__}: {exc}",
                 metadata=self._meta(task, elapsed),
+                events=events,
             )
 
         from telemetry.execution_log import record_agent_result

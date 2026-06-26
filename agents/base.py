@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from models.events import AgentEvent
 
 
 @dataclass
@@ -32,6 +35,7 @@ class AgentResult:
     exit_code: int
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    events: list[AgentEvent] = field(default_factory=list)
 
 
 class AgentAdapter(Protocol):
