@@ -18,6 +18,7 @@ from pathlib import Path
 
 from config.logging import configure_logging, get_logger
 from config.settings import settings
+from models.board import TaskBoard
 from models.context import AgentContext, PipelineRun
 from models.github import CIStatus, DebugContext
 from models.patch import PatchResult, PatchSet, PatchStatus, QualityGateResult
@@ -181,6 +182,7 @@ async def _run_workers(
     task_graph,
     ctx: AgentContext,
     label: str = "worker",
+    board: "TaskBoard | None" = None,
 ) -> list[PatchResult]:
     """Run Workers with bounded concurrency and dependency enforcement.
 
@@ -192,6 +194,9 @@ async def _run_workers(
     are checked against the set of successfully completed subtask IDs.  Tasks whose
     dependencies failed are skipped with status=FAILED rather than run with broken
     inputs, preventing cascading patch errors.
+
+    If `board` is provided, each status transition is mirrored to it so callers
+    can observe real-time progress via board.snapshot().
     """
     sem = asyncio.Semaphore(settings.MAX_PARALLEL_WORKERS)
     completed_ids: set[str] = set()   # subtask IDs that finished with SUCCESS
@@ -210,6 +215,8 @@ async def _run_workers(
                     f"dependencies not satisfied: {unmet}"
                 )
                 subtask.status = TaskStatus.FAILED
+                if board is not None:
+                    board.update(subtask.id, TaskStatus.FAILED, worker_id=worker_label)
                 return PatchResult(
                     subtask_id=subtask.id,
                     worker_id=worker_label,
@@ -220,6 +227,8 @@ async def _run_workers(
                 )
 
             subtask.status = TaskStatus.IN_PROGRESS
+            if board is not None:
+                board.update(subtask.id, TaskStatus.IN_PROGRESS, worker_id=worker_label)
             async with sem:
                 worker = ClaudeCodeWorker(worker_label, ctx)
                 result = await worker.execute(subtask)
@@ -227,8 +236,12 @@ async def _run_workers(
             if result.status == PatchStatus.SUCCESS:
                 subtask.status = TaskStatus.COMPLETED
                 completed_ids.add(subtask.id)
+                if board is not None:
+                    board.update(subtask.id, TaskStatus.COMPLETED, worker_id=worker_label)
             else:
                 subtask.status = TaskStatus.FAILED
+                if board is not None:
+                    board.update(subtask.id, TaskStatus.FAILED, worker_id=worker_label)
 
             return result
 
