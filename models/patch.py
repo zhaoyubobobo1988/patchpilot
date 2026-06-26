@@ -55,6 +55,15 @@ class MergedPatch(BaseModel):
     error_details: str | None = None
 
 
+class QualityGateResult(BaseModel):
+    level: str                        # "task" | "integration" | "pre_publish"
+    passed: bool
+    command: str
+    exit_code: int | None = None
+    output_summary: str = ""
+    warn_only: bool = False
+
+
 class IntegrationResult(BaseModel):
     """Structured summary produced by IntegratorAgent after each integrate() call."""
 

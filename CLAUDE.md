@@ -65,6 +65,24 @@ diff --git a/features/... b/features/...
 - Output anything other than unified diff patches
 - Merge PRs
 
+## Development Workflow: Test-Driven Development (TDD)
+
+**All feature work in this repo follows strict TDD. No exceptions.**
+
+### The mandatory cycle for every PR
+
+1. **Red** — Write the tests first. Run them and confirm they FAIL before writing any implementation. Show the failure output.
+2. **Green** — Write the minimal implementation that makes the tests pass. No more, no less.
+3. **Refactor** — Clean up without changing behaviour. Tests must stay green.
+
+### Rules
+
+- Never write implementation code before the tests exist and are confirmed red.
+- Never write tests after the implementation — that is not TDD, it is test-after.
+- Each PR starts with a failing test file. Implementation comes only after the red run is shown.
+- Tests live in `tests/unit/` (unit) or `tests/integration/` (integration). Mirror the module path: `agents/foo/agent.py` → `tests/unit/test_foo_agent.py`.
+- A PR is only complete when: tests were red first → implementation written → tests are green → full suite still green.
+
 ## Execution Strategy
 
 1. Identify affected modules and minimal change set

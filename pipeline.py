@@ -20,8 +20,8 @@ from config.logging import configure_logging, get_logger
 from config.settings import settings
 from models.context import AgentContext, PipelineRun
 from models.github import CIStatus, DebugContext
-from models.patch import PatchResult, PatchSet
-from models.task import FeatureTask, SubTask
+from models.patch import PatchResult, PatchSet, PatchStatus, QualityGateResult
+from models.task import FeatureTask, SubTask, TaskStatus
 
 from telemetry.execution_log import ExecutionRecord, record_execution
 from agents.context_agent.agent import ContextAgent
@@ -144,23 +144,99 @@ def _with_extra_constraint(subtask: SubTask, extra: str) -> SubTask:
     )
 
 
+async def _run_quality_gate(
+    command: str,
+    cwd: str,
+    level: str,
+    timeout: int = 120,
+) -> QualityGateResult:
+    """Run a shell command as a quality gate; return structured result."""
+    try:
+        process = await asyncio.create_subprocess_shell(
+            command,
+            cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_b, stderr_b = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        exit_code = process.returncode or 0
+        output = (stderr_b or stdout_b).decode("utf-8", errors="replace")[:500]
+        return QualityGateResult(
+            level=level, passed=(exit_code == 0),
+            command=command, exit_code=exit_code, output_summary=output,
+        )
+    except asyncio.TimeoutError:
+        return QualityGateResult(
+            level=level, passed=False, command=command,
+            exit_code=-1, output_summary=f"timed out after {timeout}s",
+        )
+    except Exception as exc:
+        return QualityGateResult(
+            level=level, passed=False, command=command,
+            exit_code=-1, output_summary=str(exc),
+        )
+
+
 async def _run_workers(
     task_graph,
     ctx: AgentContext,
     label: str = "worker",
 ) -> list[PatchResult]:
-    """对 task_graph 的所有并行组依次运行 Worker，返回所有 PatchResult。"""
+    """Run Workers with bounded concurrency and dependency enforcement.
+
+    A single asyncio.Semaphore(MAX_PARALLEL_WORKERS) spans all parallel groups
+    so the total number of live Worker subprocesses never exceeds the configured
+    limit, regardless of how many tasks a group contains.
+
+    Before each subtask starts, its declared dependencies (task_graph.dependencies)
+    are checked against the set of successfully completed subtask IDs.  Tasks whose
+    dependencies failed are skipped with status=FAILED rather than run with broken
+    inputs, preventing cascading patch errors.
+    """
+    sem = asyncio.Semaphore(settings.MAX_PARALLEL_WORKERS)
+    completed_ids: set[str] = set()   # subtask IDs that finished with SUCCESS
     all_patches: list[PatchResult] = []
+
     for group_idx, group in enumerate(task_graph.parallel_groups):
         subtasks = [task_graph.get_subtask(sid) for sid in group]
-        workers = [
-            ClaudeCodeWorker(f"{label}-{group_idx}-{i}", ctx)
-            for i in range(len(subtasks))
-        ]
+
+        async def _run_one(worker_label: str, subtask: SubTask) -> PatchResult:
+            # Skip if any declared dependency did not complete successfully
+            deps = task_graph.dependencies.get(subtask.id, [])
+            unmet = [d for d in deps if d not in completed_ids]
+            if unmet:
+                logger.warning(
+                    f"[{label}] Skipping subtask {subtask.id!r}: "
+                    f"dependencies not satisfied: {unmet}"
+                )
+                subtask.status = TaskStatus.FAILED
+                return PatchResult(
+                    subtask_id=subtask.id,
+                    worker_id=worker_label,
+                    patch_content="",
+                    affected_files=[],
+                    status=PatchStatus.FAILED,
+                    error_message=f"Dependencies not satisfied: {unmet}",
+                )
+
+            subtask.status = TaskStatus.IN_PROGRESS
+            async with sem:
+                worker = ClaudeCodeWorker(worker_label, ctx)
+                result = await worker.execute(subtask)
+
+            if result.status == PatchStatus.SUCCESS:
+                subtask.status = TaskStatus.COMPLETED
+                completed_ids.add(subtask.id)
+            else:
+                subtask.status = TaskStatus.FAILED
+
+            return result
+
         results = await asyncio.gather(
-            *[w.execute(st) for w, st in zip(workers, subtasks)]
+            *[_run_one(f"{label}-{group_idx}-{i}", st) for i, st in enumerate(subtasks)]
         )
         all_patches.extend(results)
+
     return all_patches
 
 
@@ -300,6 +376,36 @@ async def run_pipeline(
             _record_pipeline_completed(run, run_id)
             return run  # re-integration failed after review retry
         _log_integration_result(integrator, run_id)
+
+    # ── Stage 5b: Pre-publish quality gate (lint / typecheck) ───────────────────
+    for gate_cmd, gate_name in [
+        (settings.LINT_COMMAND, "lint"),
+        (settings.TYPECHECK_COMMAND, "typecheck"),
+    ]:
+        if not gate_cmd:
+            continue
+        gate_result = await _run_quality_gate(
+            command=gate_cmd,
+            cwd=ctx.workspace_path,
+            level="pre_publish",
+        )
+        if gate_result.passed:
+            logger.info(f"[{run_id}] Quality gate [{gate_name}] passed")
+        elif settings.QUALITY_GATE_WARN_ONLY:
+            logger.warning(
+                f"[{run_id}] Quality gate [{gate_name}] failed (warn-only): "
+                f"{gate_result.output_summary[:200]}"
+            )
+        else:
+            msg = (
+                f"Quality gate [{gate_name}] blocked publish: "
+                f"{gate_result.output_summary[:200]}"
+            )
+            logger.error(f"[{run_id}] {msg}")
+            run.error_log.append(msg)
+            run.stage = "done"
+            _record_pipeline_completed(run, run_id)
+            return run
 
     # ── Stage 6: GitHubAgent — 创建 PR ──────────────────────────────────────────
     run.stage = "github"

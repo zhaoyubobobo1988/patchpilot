@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     # Codex CLI 使用自己的 OpenAI/Codex 认证体系，与自定义网关的兼容性因版本而异。
     REVIEW_AGENT_BACKEND: str = "claude-code"
 
+    # Pre-publish quality gate（lint / typecheck）
+    # 留空时跳过对应检查；失败时若 QUALITY_GATE_WARN_ONLY=True 则只记录日志不阻断。
+    LINT_COMMAND: str = ""
+    TYPECHECK_COMMAND: str = ""
+    QUALITY_GATE_WARN_ONLY: bool = False
+
     # Integrator 可选集成测试命令
     # 留空（默认）时 IntegratorAgent 跳过测试，不改变现有行为。
     # 非空时在 ctx.workspace_path 下运行该 shell 命令；失败则 pipeline 提前终止。
