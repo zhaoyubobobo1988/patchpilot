@@ -37,7 +37,9 @@ WORKDIR /build
 
 # Install all dependencies (including devDependencies for tsc)
 COPY integrations/package.json integrations/pnpm-lock.yaml ./
-RUN corepack enable && pnpm install --frozen-lockfile
+RUN corepack enable \
+    && corepack prepare pnpm@9.15.9 --activate \
+    && pnpm install --frozen-lockfile
 
 # Compile TypeScript → dist/
 COPY integrations/tsconfig.json ./
