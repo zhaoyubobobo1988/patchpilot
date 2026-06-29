@@ -9,6 +9,7 @@ from agents.worker.workspace import WorkerWorkspaceManager
 from config.llm import llm_complete
 from config.logging import get_logger
 from config.settings import settings
+from libs.permissions import PermissionChecker
 from models.patch import PatchResult, PatchStatus
 from models.task import SubTask
 from models.context import AgentContext
@@ -145,17 +146,19 @@ class ClaudeCodeWorker:
         raise ValueError(f"No valid unified diff found in response: {response[:200]}")
 
     def _validate_diff(self, diff: str, subtask: SubTask) -> bool:
-        for f in self._extract_affected_files(diff):
-            if not (f.startswith("features/") or f.startswith("a/features/") or f.startswith("b/features/")):
-                logger.warning(f"[{self.worker_id}] diff touches out-of-scope file: {f}")
-                return False
-        return True
+        # PR10: delegate to centralized PermissionChecker
+        # Only pass subtask.files as allowed_files when it's a non-empty list
+        # (backward compat — MagicMock or empty list treated as no restriction)
+        raw_files = getattr(subtask, "files", None)
+        allowed = raw_files if (isinstance(raw_files, list) and raw_files) else None
+        is_valid, violations = PermissionChecker.validate_diff(diff, allowed_files=allowed)
+        if violations:
+            logger.warning(
+                f"[{self.worker_id}] diff touches out-of-scope file(s): "
+                f"{', '.join(violations)}"
+            )
+        return is_valid
 
     def _extract_affected_files(self, diff: str) -> list[str]:
-        files: list[str] = []
-        for line in diff.splitlines():
-            if line.startswith("diff --git"):
-                parts = line.split(" ")
-                if len(parts) >= 4:
-                    files.append(parts[3].lstrip("b/"))
-        return files
+        # PR10: delegate to centralized PermissionChecker (includes normalization)
+        return PermissionChecker.extract_affected_files(diff)

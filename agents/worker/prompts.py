@@ -26,7 +26,7 @@ diff --git a/... b/...
 ## Forbidden Operations
 - Modify /core/**
 - Modify /infra/**
-- Modify CI/CD configuration
+- Modify .github/workflows/**, .gitlab-ci.yml, Jenkinsfile, or any CI/CD configuration
 - Modify files outside the assigned feature scope
 
 ## Execution Strategy

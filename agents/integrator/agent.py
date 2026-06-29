@@ -12,7 +12,7 @@ Checks performed (all deterministic — no LLM, no AgentRegistry):
   1. Refuse FAILED MergedPatch  → ValueError
   2. Refuse empty merged_diff   → ValueError
   3. Log diff statistics
-  4. Warn on protected-dir touches (core/ / infra/), Reviewer makes final call
+  4. Block on permission violations (core/, infra/, CI/CD paths, traversals)
   5. Optionally run INTEGRATION_TEST_COMMAND (default: empty → skip)
      → failure or timeout → ValueError → pipeline terminates early
 
@@ -31,6 +31,7 @@ import asyncio
 
 from config.logging import get_logger
 from config.settings import settings
+from libs.permissions import PermissionChecker
 from models.context import AgentContext
 from models.patch import IntegrationResult, MergedPatch, PatchStatus
 from models.task import FeatureTask
@@ -38,7 +39,6 @@ from telemetry.execution_log import ExecutionRecord, record_execution
 
 logger = get_logger(__name__)
 
-_PROTECTED_DIRS = ("core/", "infra/")
 _OUTPUT_TRUNCATE = 1000   # max chars of stdout/stderr in error messages
 
 
@@ -100,17 +100,16 @@ class IntegratorAgent:
             f"conflicts_resolved={merged.conflicts_resolved}"
         )
 
-        # ── Check 4: protected directories (informational, Reviewer decides) ──
-        protected_hits = [
-            line for line in merged.merged_diff.splitlines()
-            if line.startswith("diff --git")
-            and any(f"/{d}" in line or f" {d}" in line for d in _PROTECTED_DIRS)
-        ]
-        if protected_hits:
-            logger.warning(
-                f"[Integrator] diff touches {len(protected_hits)} protected "
-                f"path(s) (core/ / infra/) — Reviewer will make the final decision"
+        # ── Check 4: permission boundary (PR10: blocking, defense-in-depth) ──
+        is_valid, violations = PermissionChecker.validate_diff(merged.merged_diff)
+        if not is_valid:
+            error_msg = (
+                f"[Integrator] BLOCKED: merged diff violates permission boundary — "
+                f"violation(s): {', '.join(violations[:5])}"
             )
+            logger.warning(error_msg)
+            self._record(task)
+            raise ValueError(error_msg)
 
         # ── Check 5: optional integration test command ────────────────────────
         tests_configured = bool(settings.INTEGRATION_TEST_COMMAND)
@@ -126,7 +125,7 @@ class IntegratorAgent:
                 line_count=line_count,
                 source_patch_count=len(merged.source_patch_ids),
                 conflicts_resolved=merged.conflicts_resolved,
-                protected_path_count=len(protected_hits),
+                protected_path_count=len(violations),
                 tests_configured=tests_configured,
                 tests_passed=False,
                 test_command=settings.INTEGRATION_TEST_COMMAND,
@@ -144,7 +143,7 @@ class IntegratorAgent:
             line_count=line_count,
             source_patch_count=len(merged.source_patch_ids),
             conflicts_resolved=merged.conflicts_resolved,
-            protected_path_count=len(protected_hits),
+            protected_path_count=len(violations),
             tests_configured=tests_configured,
             tests_passed=True if tests_configured else None,
             test_command=settings.INTEGRATION_TEST_COMMAND,

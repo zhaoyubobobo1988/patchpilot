@@ -10,6 +10,7 @@ from agents.result_utils import extract_agent_output
 from config.llm import llm_complete
 from config.logging import get_logger
 from config.settings import settings
+from libs.permissions import PermissionChecker
 from models.context import AgentContext
 from models.task import FeatureTask, SubTask, TaskGraph, TaskStatus
 from .prompts import ORCHESTRATOR_SYSTEM_PROMPT, build_orchestrator_prompt
@@ -111,11 +112,27 @@ class OrchestratorAgent:
 
         subtasks: list[SubTask] = []
         for st_data in data.get("subtasks", []):
+            raw_files = st_data.get("files", [])
+            # PR10: validate SubTask files — strip violations, keep legal files
+            is_valid, violations = PermissionChecker.validate_subtask_files(raw_files)
+            if not is_valid:
+                logger.warning(
+                    f"[Orchestrator] SubTask {st_data.get('id', '?')} has "
+                    f"{len(violations)} out-of-scope file(s): {violations}"
+                )
+                # Graceful degradation: keep only allowed files
+                raw_files = [f for f in raw_files if f not in violations]
+                if not raw_files:
+                    logger.warning(
+                        f"[Orchestrator] SubTask {st_data.get('id', '?')} — "
+                        f"all files stripped; worker must determine scope"
+                    )
+
             st = SubTask(
                 id=st_data.get("id", str(uuid.uuid4())[:8]),
                 feature=st_data["feature"],
                 goal=st_data["goal"],
-                files=st_data.get("files", []),
+                files=raw_files,
                 constraints=st_data.get("constraints", []),
                 status=TaskStatus.PENDING,
             )

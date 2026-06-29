@@ -10,6 +10,7 @@ from agents.result_utils import extract_agent_output
 from config.llm import llm_complete
 from config.logging import get_logger
 from config.settings import settings
+from libs.permissions import PermissionChecker
 from models.context import AgentContext
 from models.patch import MergedPatch, ReviewResult, ReviewComment, ReviewSeverity
 from models.task import FeatureTask
@@ -354,18 +355,13 @@ class ReviewAgent:
     # ── helpers ───────────────────────────────────────────────────────────────
 
     def _touches_protected_dirs(self, diff: str) -> bool:
-        for line in diff.splitlines():
-            if line.startswith("diff --git"):
-                if "/core/" in line or " core/" in line or "/infra/" in line or " infra/" in line:
-                    return True
-        return False
+        # PR10: delegate to centralized PermissionChecker
+        is_valid, _ = PermissionChecker.validate_diff(diff)
+        return not is_valid
 
     def _find_protected_file(self, diff: str) -> str:
-        for line in diff.splitlines():
-            if line.startswith("diff --git") and ("/core/" in line or "/infra/" in line):
-                parts = line.split()
-                return parts[-1].lstrip("b/") if parts else "unknown"
-        return "unknown"
+        # PR10: delegate to centralized PermissionChecker
+        return PermissionChecker.find_first_violation(diff) or "unknown"
 
     def _parse_response(self, raw: str, patch_id: str) -> ReviewResult:
         try:
