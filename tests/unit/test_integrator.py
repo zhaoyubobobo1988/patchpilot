@@ -155,11 +155,11 @@ async def test_integrate_failed_error_message_contains_details(ctx, task):
     assert task.id in msg                             # task context present
 
 
-# ── protected directories ──────────────────────────────────────────────────────
+# ── protected directories / PR10 权限边界 ─────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_integrate_allows_protected_dir_diff_but_logs_warning(ctx, task):
-    """Protected dir touch is NOT blocked by Integrator (Reviewer decides)"""
+async def test_integrate_blocks_protected_dir_diff(ctx, task):
+    """PR10: core/ 修改不应被 Integrator 放行 — 防御纵深，直接阻断"""
     core_diff = (
         "diff --git a/core/auth.py b/core/auth.py\n"
         "--- a/core/auth.py\n"
@@ -168,9 +168,41 @@ async def test_integrate_allows_protected_dir_diff_but_logs_warning(ctx, task):
     )
     patch = _ok_patch(diff=core_diff)
     agent = IntegratorAgent(ctx)
-    # Must NOT raise — Reviewer will make the blocking decision
-    result = await agent.integrate(patch, task)
-    assert result.merged_diff == core_diff
+    # PR10: Integrator now blocks protected paths (defense-in-depth)
+    with pytest.raises(ValueError) as exc_info:
+        await agent.integrate(patch, task)
+    msg = str(exc_info.value)
+    assert "core/auth.py" in msg or "protected" in msg.lower()
+
+
+@pytest.mark.asyncio
+async def test_integrate_blocks_ci_path(ctx, task):
+    """PR10: CI/CD 路径 .github/workflows/ci.yml 应被 Integrator 阻断"""
+    ci_diff = (
+        "diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml\n"
+        "--- a/.github/workflows/ci.yml\n"
+        "+++ b/.github/workflows/ci.yml\n"
+        "+code\n"
+    )
+    patch = _ok_patch(diff=ci_diff)
+    agent = IntegratorAgent(ctx)
+    with pytest.raises(ValueError):
+        await agent.integrate(patch, task)
+
+
+@pytest.mark.asyncio
+async def test_integrate_blocks_traversal(ctx, task):
+    """PR10: 路径穿越应被 Integrator 阻断"""
+    traversal_diff = (
+        "diff --git a/features/../core/auth.py b/features/../core/auth.py\n"
+        "--- a/features/../core/auth.py\n"
+        "+++ b/features/../core/auth.py\n"
+        "+code\n"
+    )
+    patch = _ok_patch(diff=traversal_diff)
+    agent = IntegratorAgent(ctx)
+    with pytest.raises(ValueError):
+        await agent.integrate(patch, task)
 
 
 @pytest.mark.asyncio
@@ -715,7 +747,7 @@ async def test_last_result_success_is_true(ctx, task):
 @pytest.mark.asyncio
 async def test_last_result_line_count_correct(ctx, task):
     """line_count reflects the number of newlines in merged_diff"""
-    diff = "diff --git a/x b/x\n+a\n+b\n+c\n"   # 4 newlines
+    diff = "diff --git a/features/x.py b/features/x.py\n+a\n+b\n+c\n"   # 4 newlines
     with patch("config.settings.settings.INTEGRATION_TEST_COMMAND", ""):
         agent = IntegratorAgent(ctx)
         await agent.integrate(_ok_patch(diff=diff), task)
@@ -753,15 +785,17 @@ async def test_last_result_conflicts_resolved(ctx, task):
 
 @pytest.mark.asyncio
 async def test_last_result_protected_path_count(ctx, task):
-    """Protected-dir touches must increment protected_path_count"""
+    """PR10: Protected-dir touches now raise ValueError (blocking, not warning)"""
     diff = (
         "diff --git a/core/auth.py b/core/auth.py\n+x\n"
         "diff --git a/features/y.py b/features/y.py\n+y\n"
     )
     with patch("config.settings.settings.INTEGRATION_TEST_COMMAND", ""):
         agent = IntegratorAgent(ctx)
-        await agent.integrate(_ok_patch(diff=diff), task)
-    assert agent.last_result.protected_path_count == 1
+        with pytest.raises(ValueError) as exc_info:
+            await agent.integrate(_ok_patch(diff=diff), task)
+    msg = str(exc_info.value)
+    assert "core/auth.py" in msg or "permission" in msg.lower()
 
 
 # ── test-command fields ───────────────────────────────────────────────────────

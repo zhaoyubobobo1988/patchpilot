@@ -53,13 +53,21 @@ def test_extract_diff_fails_on_noise(ctx):
 def test_validate_diff_passes_features(ctx):
     worker = ClaudeCodeWorker("w1", ctx)
     diff = "diff --git a/features/auth/login.py b/features/auth/login.py\n"
-    assert worker._validate_diff(diff, MagicMock()) is True
+    subtask = SubTask(
+        id="st001", feature="auth", goal="add login",
+        files=["features/auth/login.py"],
+    )
+    assert worker._validate_diff(diff, subtask) is True
 
 
 def test_validate_diff_fails_core(ctx):
     worker = ClaudeCodeWorker("w1", ctx)
     diff = "diff --git a/core/auth.py b/core/auth.py\n"
-    assert worker._validate_diff(diff, MagicMock()) is False
+    subtask = SubTask(
+        id="st001", feature="auth", goal="add login",
+        files=["features/auth/login.py"],
+    )
+    assert worker._validate_diff(diff, subtask) is False
 
 
 @pytest.mark.asyncio
@@ -189,3 +197,51 @@ async def test_worker_subprocess_nonzero_exit_returns_failed(ctx, subtask):
         worker = ClaudeCodeWorker("w1", ctx)
         result = await worker.execute(subtask)
     assert result.status == PatchStatus.FAILED
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PR10 — 权限边界加固测试
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_validate_diff_rejects_out_of_scope_features(ctx):
+    """Worker 触碰了未分配的 features/ 文件，应被拒绝"""
+    worker = ClaudeCodeWorker("w1", ctx)
+    diff = "diff --git a/features/other.py b/features/other.py\n+code\n"
+    subtask = SubTask(
+        id="st001", feature="auth", goal="add login",
+        files=["features/auth.py"],
+    )
+    assert worker._validate_diff(diff, subtask) is False
+
+
+def test_validate_diff_rejects_traversal(ctx):
+    """路径穿越 'features/../core/x.py' 归一化后变成 'core/x.py'，应被拒绝"""
+    worker = ClaudeCodeWorker("w1", ctx)
+    diff = "diff --git a/features/../core/x.py b/features/../core/x.py\n+code\n"
+    subtask = SubTask(
+        id="st001", feature="auth", goal="add login",
+        files=["features/auth.py"],
+    )
+    assert worker._validate_diff(diff, subtask) is False
+
+
+def test_validate_diff_rejects_ci_path(ctx):
+    """CI/CD 路径 .github/workflows/ci.yml 应被拒绝"""
+    worker = ClaudeCodeWorker("w1", ctx)
+    diff = "diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml\n+code\n"
+    subtask = SubTask(
+        id="st001", feature="auth", goal="add login",
+        files=["features/auth.py"],
+    )
+    assert worker._validate_diff(diff, subtask) is False
+
+
+def test_validate_diff_respects_allowed_files(ctx):
+    """Worker 仅触碰分配的 files 时验证通过"""
+    worker = ClaudeCodeWorker("w1", ctx)
+    diff = "diff --git a/features/auth.py b/features/auth.py\n+code\n"
+    subtask = SubTask(
+        id="st001", feature="auth", goal="add login",
+        files=["features/auth.py", "features/login.py"],
+    )
+    assert worker._validate_diff(diff, subtask) is True

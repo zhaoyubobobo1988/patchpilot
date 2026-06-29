@@ -325,3 +325,41 @@ def test_codex_agent_sets_base_url_only_when_configured():
         env = CodexAgent()._build_env()
     # System value preserved, GLM URL not injected
     assert env.get("OPENAI_BASE_URL") == "https://existing-system-url.com"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PR10 — 权限边界加固测试
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@pytest.mark.asyncio
+async def test_review_blocks_ci_modification(ctx, task):
+    """CI/CD 修改（.github/workflows/ci.yml）应在前置检查中被阻止"""
+    ci_diff = (
+        "diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml\n"
+        "--- a/.github/workflows/ci.yml\n"
+        "+++ b/.github/workflows/ci.yml\n"
+        "@@ -1 +1,2 @@\n"
+        "+# changed\n"
+    )
+    agent = ReviewAgent(ctx)
+    merged = _make_merged(ci_diff)
+    result = await agent.review(merged, task)
+    assert result.approved is False
+    assert any(c.severity == ReviewSeverity.BLOCK for c in result.comments)
+
+
+@pytest.mark.asyncio
+async def test_review_blocks_traversal(ctx, task):
+    """路径穿越 'features/../build.py' 逃逸到仓库根目录，应被阻止（旧检查漏掉此路径）"""
+    traversal_diff = (
+        "diff --git a/features/../build.py b/features/../build.py\n"
+        "--- a/features/../build.py\n"
+        "+++ b/features/../build.py\n"
+        "@@ -1 +1,2 @@\n"
+        "+# changed\n"
+    )
+    agent = ReviewAgent(ctx)
+    merged = _make_merged(traversal_diff)
+    result = await agent.review(merged, task)
+    assert result.approved is False
+    assert any(c.severity == ReviewSeverity.BLOCK for c in result.comments)
