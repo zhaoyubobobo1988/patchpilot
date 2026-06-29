@@ -24,7 +24,6 @@ FROM python:3.11-slim AS python-builder
 WORKDIR /build
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-ENV UV_COMPILE_BYTECODE=1
 
 # Layer cache: deps change less often than code
 COPY pyproject.toml uv.lock ./
