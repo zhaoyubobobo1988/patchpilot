@@ -16,6 +16,7 @@ from agents.context_agent.agent import ContextAgent
 from agents.orchestrator.agent import OrchestratorAgent
 from config.logging import get_logger
 from models.context import AgentContext, PipelineRun
+from models.errors import ClassifiedError, classify_failure
 
 if TYPE_CHECKING:
     from models.task import FeatureTask, TaskGraph
@@ -37,6 +38,7 @@ def _clone_repo(workspace_path: str, repository: str) -> None:
 class StageResult(BaseModel):
     done: bool = False          # True → pipeline should stop (early exit)
     error: str | None = None    # set when done=True due to an error
+    classified_error: ClassifiedError | None = None  # PR8: structured failure info
 
 
 # ── PipelineState ─────────────────────────────────────────────────────────────
@@ -74,7 +76,12 @@ class CloneStage:
             return StageResult()
         except Exception as exc:
             logger.error(f"[{state.run.run_id}] CloneStage failed: {exc}")
-            return StageResult(done=True, error=str(exc))
+            classified = classify_failure(
+                exc, message=str(exc), stage=self.name,
+                context={"repository": state.task.repository},
+            )
+            state.run.classified_errors.append(classified)
+            return StageResult(done=True, error=str(exc), classified_error=classified)
 
 
 class ContextStage:
@@ -91,7 +98,12 @@ class ContextStage:
             return StageResult()
         except Exception as exc:
             logger.error(f"[{state.run.run_id}] ContextStage failed: {exc}")
-            return StageResult(done=True, error=str(exc))
+            classified = classify_failure(
+                exc, message=str(exc), stage=self.name,
+                context={"model": state.ctx.model},
+            )
+            state.run.classified_errors.append(classified)
+            return StageResult(done=True, error=str(exc), classified_error=classified)
 
 
 class OrchestrateStage:
@@ -113,4 +125,9 @@ class OrchestrateStage:
             return StageResult()
         except Exception as exc:
             logger.error(f"[{state.run.run_id}] OrchestrateStage failed: {exc}")
-            return StageResult(done=True, error=str(exc))
+            classified = classify_failure(
+                exc, message=str(exc), stage=self.name,
+                context={"model": state.ctx.model},
+            )
+            state.run.classified_errors.append(classified)
+            return StageResult(done=True, error=str(exc), classified_error=classified)

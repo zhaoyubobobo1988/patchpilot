@@ -4,6 +4,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from models.errors import ClassifiedError
+
 
 class FileSnippet(BaseModel):
     path: str
@@ -39,3 +41,4 @@ class PipelineRun(BaseModel):
     pr_url: str | None = None
     ci_passed: bool | None = None
     error_log: list[str] = []
+    classified_errors: list[ClassifiedError] = []

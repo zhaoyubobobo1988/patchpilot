@@ -4,6 +4,8 @@ from enum import Enum
 
 from pydantic import BaseModel
 
+from models.errors import ClassifiedError
+
 
 class DecisionKind(str, Enum):
     CONTINUE = "continue"
@@ -15,3 +17,4 @@ class OrchestratorDecision(BaseModel):
     kind: DecisionKind = DecisionKind.CONTINUE
     reason: str = ""
     max_retries: int = 1
+    classified_error: ClassifiedError | None = None

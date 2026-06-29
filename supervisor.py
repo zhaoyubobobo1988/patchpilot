@@ -13,16 +13,44 @@ from typing import Callable
 
 from config.logging import get_logger
 from models.decision import DecisionKind, OrchestratorDecision
+from models.errors import FailureCategory, classify_failure
 from pipeline_stages import PipelineState, StageExecutor, StageResult
 
 logger = get_logger(__name__)
 
 
 def _default_decide(result: StageResult, stage_name: str, attempt: int) -> OrchestratorDecision:
-    if result.done:
-        reason = result.error or f"stage {stage_name!r} signalled done"
-        return OrchestratorDecision(kind=DecisionKind.ABORT, reason=reason)
-    return OrchestratorDecision(kind=DecisionKind.CONTINUE)
+    # ── success path ───────────────────────────────────────────────────────
+    if not result.done:
+        return OrchestratorDecision(kind=DecisionKind.CONTINUE)
+
+    # ── failure path: use classified_error when available ──────────────────
+    classified = result.classified_error
+    if classified is None:
+        # Backward compat: classify from raw error string
+        classified = classify_failure(
+            message=result.error or "",
+            stage=stage_name,
+        )
+
+    # ── category-driven decision ──────────────────────────────────────────
+    if classified.category == FailureCategory.TRANSIENT:
+        return OrchestratorDecision(
+            kind=DecisionKind.RETRY,
+            reason=f"{stage_name!r}: transient failure — {classified.message}",
+            max_retries=3,
+            classified_error=classified,
+        )
+
+    # PERMANENT, CONFIG, EXTERNAL, RESOURCE, UNKNOWN → ABORT
+    return OrchestratorDecision(
+        kind=DecisionKind.ABORT,
+        reason=(
+            f"{stage_name!r}: {classified.category.value} failure — "
+            f"{classified.message or classified.recovery_hint}"
+        ),
+        classified_error=classified,
+    )
 
 
 class SupervisorLoop:
