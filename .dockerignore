@@ -1,0 +1,39 @@
+# Python
+.env
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.ruff_cache/
+dist/
+*.egg-info/
+.venv/
+.uv/
+
+# TypeScript
+integrations/node_modules/
+integrations/dist/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+
+# Workspace temp files (keep out of image)
+/tmp/
+*.patch.tmp
+pdf_out.txt
+
+# Documentation
+*.pdf
+*.docx

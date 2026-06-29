@@ -1,30 +1,53 @@
-import crypto from "node:crypto";
-import { FeishuChallenge, FeishuEvent } from "./types.js";
+/**
+ * Feishu webhook helpers — URL verification + message parsing.
+ */
+import type {
+  FeishuChallenge,
+  FeishuEvent,
+  ParsedRequirement,
+} from "./types.js";
 
-export function parseFeishuMessage(raw: FeishuEvent): string {
-  try {
-    const content = JSON.parse(raw.event.message.content) as { text?: string };
-    return content.text?.trim() ?? "";
-  } catch {
-    return raw.event.message.content.trim();
-  }
-}
+// ── URL verification ─────────────────────────────────────────────────────────
 
-export function verifyFeishuSignature(
-  body: string,
-  timestamp: string,
-  nonce: string,
-  token: string
-): boolean {
-  const toSign = timestamp + nonce + token + body;
-  const digest = crypto.createHash("sha256").update(toSign).digest("hex");
-  return digest.length > 0; // placeholder: real impl compares digest against header
-}
-
-export function isUrlVerification(body: unknown): body is FeishuChallenge {
+export function isUrlVerification(
+  body: unknown,
+): body is FeishuChallenge {
   return (
     typeof body === "object" &&
     body !== null &&
     (body as FeishuChallenge).type === "url_verification"
   );
+}
+
+// ── Message parsing ──────────────────────────────────────────────────────────
+
+/**
+ * Extract a {@link ParsedRequirement} from an inbound Feishu event.
+ * Returns `null` when the event is not a text message or the content is empty.
+ */
+export function parseFeishuEvent(
+  body: FeishuEvent,
+): ParsedRequirement | null {
+  const ev = body?.event;
+  if (!ev) return null;
+
+  const { message, sender } = ev;
+  if (message.message_type !== "text") return null;
+
+  let text = "";
+  try {
+    const parsed = JSON.parse(message.content) as { text?: string };
+    text = (parsed.text ?? "").trim();
+  } catch {
+    text = message.content.trim();
+  }
+
+  if (!text) return null;
+
+  return {
+    text,
+    chatId: message.chat_id,
+    messageId: message.message_id,
+    senderOpenId: sender.sender_id.open_id,
+  };
 }

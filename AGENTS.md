@@ -6,6 +6,16 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 This is the **OpenClaw AI Software Engineering System** — a multi-agent pipeline that converts natural language feature requirements into GitHub Pull Requests via patch-based code generation.
 
+## Deployment Notes
+
+This project is deployed on a server reachable over SSH:
+
+- Host: `10.48.0.81`
+- SSH user: `zy`
+- SSH port: `22`
+
+Do not store SSH passwords or other secrets in this repository. Use an SSH key or an external secret manager when possible.
+
 ## Pipeline Architecture
 
 ```

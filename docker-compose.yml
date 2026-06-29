@@ -1,0 +1,29 @@
+# =============================================================================
+# OpenClaw — Production deployment
+# =============================================================================
+# Usage:
+#   1. Copy .env.example → .env and fill in API keys + Feishu credentials
+#   2. docker compose up -d
+#   3. Configure Feishu bot webhook URL: http://<your-server>:3001/feishu/webhook
+# =============================================================================
+
+services:
+  openclaw:
+    build: .
+    container_name: openclaw
+    restart: unless-stopped
+    ports:
+      - "${TS_BRIDGE_PORT:-3001}:3001"
+    env_file:
+      - .env
+    environment:
+      - PIPELINE_DIR=/opt/openclaw
+      - PYTHON_BIN=python
+    volumes:
+      # Persistent workspace cache — speeds up subsequent pipeline runs
+      - openclaw_workspaces:/tmp/openclaw-workspaces
+      # Optional: mount host's .gitconfig for private repo access
+      # - ~/.gitconfig:/home/openclaw/.gitconfig:ro
+
+volumes:
+  openclaw_workspaces:
