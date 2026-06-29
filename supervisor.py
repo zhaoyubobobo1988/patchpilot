@@ -9,12 +9,16 @@ callback, and acts on the returned OrchestratorDecision:
 """
 from __future__ import annotations
 
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from config.logging import get_logger
 from models.decision import DecisionKind, OrchestratorDecision
 from models.errors import FailureCategory, classify_failure
 from pipeline_stages import PipelineState, StageExecutor, StageResult
+from telemetry.spans import Span, SpanKind
+
+if TYPE_CHECKING:
+    from telemetry.metrics import PipelineMetrics
 
 logger = get_logger(__name__)
 
@@ -58,15 +62,47 @@ class SupervisorLoop:
         self,
         stages: list[StageExecutor],
         decide: Callable[[StageResult, str, int], OrchestratorDecision] | None = None,
+        metrics: PipelineMetrics | None = None,         # PR9 observability
+        parent_span: Span | None = None,               # PR9 observability
     ) -> None:
         self._stages = stages
         self._decide = decide or _default_decide
+        self._metrics = metrics
+        self._parent_span = parent_span
 
     async def run(self, state: PipelineState) -> PipelineState:
         for stage in self._stages:
             attempt = 0
             while True:
-                result = await stage.execute(state)
+                # ── PR9: wrap stage execution in a span ──────────────────
+                span_name = f"stage:{stage.name}"
+                if attempt > 0:
+                    span_name += f":retry{attempt}"
+                async with Span(
+                    name=span_name,
+                    kind=SpanKind.STAGE,
+                    parent=self._parent_span,
+                ) as span:
+                    result = await stage.execute(state)
+
+                # ── PR9: record metric ───────────────────────────────────
+                if self._metrics is not None:
+                    error_category: str | None = None
+                    if result.classified_error is not None:
+                        error_category = result.classified_error.category.value
+                    elif result.error:
+                        # fallback: classify from raw error string
+                        classified = classify_failure(message=result.error, stage=stage.name)
+                        error_category = classified.category.value
+
+                    self._metrics.record_stage_attempt(
+                        stage_name=stage.name,
+                        elapsed_seconds=span.elapsed or 0.0,
+                        success=not result.done,
+                        error=result.error,
+                        error_category=error_category,
+                    )
+
                 decision = self._decide(result, stage.name, attempt)
 
                 if decision.kind == DecisionKind.CONTINUE:

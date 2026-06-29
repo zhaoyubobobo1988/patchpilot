@@ -102,5 +102,13 @@ class Settings(BaseSettings):
     # 非空时每个 Agent 执行事件追加一行 JSON 到该文件；父目录自动创建。
     EXECUTION_LOG_PATH: str = ""
 
+    # 可观测性（PR9 span tracing / metrics）
+    # "jsonl"  — 仅写入 JSONL（需 EXECUTION_LOG_PATH 非空）
+    # "console" — 仅打印到控制台
+    # "both"   — 同时写入 JSONL 和控制台
+    # "none"   — 关闭所有可观测性输出
+    OBSERVABILITY_MODE: str = "jsonl"
+    OBSERVABILITY_VERBOSE: bool = False
+
 
 settings = Settings()
