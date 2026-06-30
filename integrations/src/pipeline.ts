@@ -68,13 +68,19 @@ export function runPipeline(
       const combined = stdout + stderr;
 
       // Extract structured fields from the final summary block
-      const runId = firstMatch(combined, /Run ID\s*:\s*(\S+)/);
-      const prUrl = firstMatch(combined, /PR URL\s*:\s*(.+)/);
-      const ciPassed = firstMatch(combined, /CI Pass\s*:\s*(\S+)/);
+      const runId = normalizeField(firstMatch(combined, /Run ID\s*:\s*(\S+)/));
+      const prUrl = normalizeField(firstMatch(combined, /PR URL\s*:\s*(.+)/));
+      const ciPassed = normalizeField(firstMatch(combined, /CI Pass\s*:\s*(\S+)/));
       const errors = firstMatch(combined, /Errors\s*:\s*(.+)/);
 
-      if (code === 0) {
+      if (code === 0 && prUrl) {
         resolve({ success: true, runId, prUrl, ciPassed: ciPassed === "True" });
+      } else if (code === 0) {
+        resolve({
+          success: false,
+          runId,
+          error: errors ?? "pipeline finished without a PR URL",
+        });
       } else {
         const snippet = (stderr || stdout).slice(-800);
         resolve({
@@ -90,4 +96,11 @@ export function runPipeline(
 function firstMatch(text: string, re: RegExp): string | undefined {
   const m = text.match(re);
   return m?.[1]?.trim() || undefined;
+}
+
+function normalizeField(value: string | undefined): string | undefined {
+  if (!value || value === "None" || value === "null" || value === "undefined") {
+    return undefined;
+  }
+  return value;
 }
