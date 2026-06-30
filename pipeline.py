@@ -80,12 +80,49 @@ def _clone_repo(workspace_path: str, repository: str, base_branch: str = "main")
         f"https://oauth2:{settings.GITHUB_TOKEN}"
         f"@github.com/{repository}.git"
     )
-    _run_git(["clone", clone_url, str(ws)], retries=2)
-    _run_git(["fetch", "origin", base_branch], cwd=ws, retries=2)
-    _run_git(["checkout", "-B", base_branch, f"origin/{base_branch}"], cwd=ws)
+    try:
+        _run_git(["clone", clone_url, str(ws)], retries=2)
+        _run_git(["fetch", "origin", base_branch], cwd=ws, retries=2)
+        _run_git(["checkout", "-B", base_branch, f"origin/{base_branch}"], cwd=ws)
+    except RuntimeError as exc:
+        if not _clone_from_local_fallback(ws, repository, clone_url, base_branch):
+            raise exc
+
     _run_git(["config", "user.email", "openclaw@noreply.github.com"], cwd=ws)
     _run_git(["config", "user.name", "OpenClaw"], cwd=ws)
     logger.info(f"Cloned {repository} → {workspace_path}")
+
+
+def _clone_from_local_fallback(
+    workspace: Path,
+    repository: str,
+    remote_url: str,
+    base_branch: str,
+) -> bool:
+    fallback = Path(settings.LOCAL_REPO_FALLBACK_PATH)
+    if not fallback.exists():
+        return False
+
+    logger.warning(
+        f"Remote clone failed; using local fallback repository at {fallback}"
+    )
+    if workspace.exists():
+        import shutil
+        shutil.rmtree(workspace)
+
+    _run_git(["clone", str(fallback), str(workspace)])
+    _run_git(["remote", "set-url", "origin", remote_url], cwd=workspace)
+
+    branches = _run_git(["branch", "--list", base_branch], cwd=workspace)
+    if branches.strip():
+        _run_git(["checkout", "-B", base_branch, base_branch], cwd=workspace)
+    else:
+        _run_git(["checkout", "-B", base_branch], cwd=workspace)
+
+    logger.info(
+        f"Cloned {repository} from local fallback → {workspace}"
+    )
+    return True
 
 
 def _run_git(args: list[str], cwd: Path | None = None, retries: int = 0) -> str:

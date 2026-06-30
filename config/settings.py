@@ -95,6 +95,7 @@ class Settings(BaseSettings):
 
     # 工作区
     WORKSPACE_BASE_PATH: str = "/tmp/openclaw-workspaces"
+    LOCAL_REPO_FALLBACK_PATH: str = ""
     LOG_LEVEL: str = "INFO"
 
     # Agent 执行数据记录（JSONL）

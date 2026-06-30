@@ -41,9 +41,12 @@ services:
       - PIPELINE_DIR=/opt/openclaw
       - PYTHON_BIN=python
       - FEISHU_LONG_CONNECTION_ENABLED=${FEISHU_LONG_CONNECTION_ENABLED:-false}
+      - LOCAL_REPO_FALLBACK_PATH=/host/patchpilot.git
     volumes:
       # Persistent workspace cache — speeds up subsequent pipeline runs
       - openclaw_workspaces:/tmp/openclaw-workspaces
+      # Local git fallback for this repo when GitHub clone is temporarily unreachable
+      - ./.git:/host/patchpilot.git:ro
       # Optional: mount host's .gitconfig for private repo access
       # - ~/.gitconfig:/home/openclaw/.gitconfig:ro
 
