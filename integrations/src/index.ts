@@ -7,8 +7,9 @@ import {
   parseFeishuEvent,
 } from "./feishu/webhook.js";
 import { sendTextMessage } from "./feishu/client.js";
+import { startFeishuLongConnection } from "./feishu/longConnection.js";
 import { runPipeline } from "./pipeline.js";
-import type { FeishuEvent } from "./feishu/types.js";
+import type { FeishuEvent, ParsedRequirement } from "./feishu/types.js";
 
 const app = express();
 
@@ -83,38 +84,17 @@ app.post("/github/close-pr", async (req: Request, res: Response) => {
 // Track in-flight pipelines to avoid duplicate runs
 const running = new Set<string>();
 
-app.post("/feishu/webhook", async (req: Request, res: Response) => {
-  const body = req.body;
-
-  // 1. URL verification handshake (Feishu event subscription)
-  const challenge = parseUrlVerification(body);
-  if (challenge) {
-    res.json({ challenge });
-    return;
-  }
-
-  // 2. Parse the requirement from the message
-  const parsed = parseFeishuEvent(body as FeishuEvent);
-  if (!parsed) {
-    // Not a text message (image / file / sticker) — ignore silently
-    res.json({ ok: true });
-    return;
-  }
-
-  // Dedup: one active pipeline per chat
+export async function handleParsedRequirement(
+  parsed: ParsedRequirement,
+): Promise<void> {
   if (running.has(parsed.chatId)) {
     await sendTextMessage(
       parsed.chatId,
-      "⏳ 上一个需求仍在处理中，请等待完成后再提交新需求。",
+      "上一个需求仍在处理中，请等待完成后再提交新需求。",
     );
-    res.json({ ok: true });
     return;
   }
 
-  // 3. Acknowledge immediately — Feishu requires < 3 s response
-  res.json({ ok: true });
-
-  // 4. Kick off pipeline asynchronously
   running.add(parsed.chatId);
   console.log(
     `[Feishu] New requirement from ${parsed.senderOpenId}: ${parsed.text.slice(0, 80)}`,
@@ -135,9 +115,9 @@ app.post("/feishu/webhook", async (req: Request, res: Response) => {
       await sendTextMessage(
         parsed.chatId,
         [
-          "❌ 未配置目标 GitHub 仓库。\n",
+          "未配置目标 GitHub 仓库。\n",
           "请设置 PIPELINE_DEFAULT_REPO 环境变量，",
-          "或在消息中使用格式：`repo=org/repo 需求描述`",
+          "或在消息中使用格式：repo=org/repo 需求描述",
         ].join(""),
       );
       return;
@@ -145,42 +125,66 @@ app.post("/feishu/webhook", async (req: Request, res: Response) => {
 
     await sendTextMessage(
       parsed.chatId,
-      `🤖 收到需求，正在处理...\n> ${requirement.slice(0, 100)}`,
+      `收到需求，正在处理...\n> ${requirement.slice(0, 100)}`,
     );
 
-    // ── Run the pipeline ──────────────────────────────────────────────
     const outcome = await runPipeline(requirement, repo);
 
     if (outcome.success && outcome.prUrl) {
-      const ciEmoji = outcome.ciPassed ? "✅" : "⚠️";
+      const ciEmoji = outcome.ciPassed ? "通过" : "未通过/超时";
       await sendTextMessage(
         parsed.chatId,
         [
-          `✅ PR 已创建\n`,
-          `📎 ${outcome.prUrl}`,
-          `🔬 CI: ${ciEmoji} ${outcome.ciPassed ? "通过" : outcome.ciPassed === false ? "未通过/超时" : "未知"}`,
-          `🆔 Run: \`${outcome.runId ?? "?"}\``,
+          "PR 已创建",
+          outcome.prUrl,
+          `CI: ${outcome.ciPassed === undefined ? "未知" : ciEmoji}`,
+          `Run: ${outcome.runId ?? "?"}`,
         ].join("\n"),
       );
     } else {
       await sendTextMessage(
         parsed.chatId,
         [
-          "❌ 处理失败\n",
+          "处理失败",
           `> ${(outcome.error ?? "未知错误").slice(0, 200)}`,
-          outcome.runId ? `🆔 Run: \`${outcome.runId}\`` : "",
+          outcome.runId ? `Run: ${outcome.runId}` : "",
         ].filter(Boolean).join("\n"),
       );
     }
   } catch (err: any) {
-    console.error(`[Feishu] Pipeline error:`, err);
+    console.error("[Feishu] Pipeline error:", err);
     await sendTextMessage(
       parsed.chatId,
-      `❌ 系统异常: ${(err?.message ?? String(err)).slice(0, 200)}`,
+      `系统异常: ${(err?.message ?? String(err)).slice(0, 200)}`,
     );
   } finally {
     running.delete(parsed.chatId);
   }
+}
+
+app.post("/feishu/webhook", async (req: Request, res: Response) => {
+  const body = req.body;
+
+  // 1. URL verification handshake (Feishu event subscription)
+  const challenge = parseUrlVerification(body);
+  if (challenge) {
+    res.json({ challenge });
+    return;
+  }
+
+  // 2. Parse the requirement from the message
+  const parsed = parseFeishuEvent(body as FeishuEvent);
+  if (!parsed) {
+    // Not a text message (image / file / sticker) — ignore silently
+    res.json({ ok: true });
+    return;
+  }
+
+  // 3. Acknowledge immediately — Feishu requires < 3 s response
+  res.json({ ok: true });
+
+  // 4. Kick off pipeline asynchronously
+  void handleParsedRequirement(parsed);
 });
 
 app.all("/feishu/webhook", (req: Request, res: Response) => {
@@ -199,5 +203,7 @@ app.get("/health", (_req: Request, res: Response) => {
 app.listen(PORT, () => {
   console.log(`OpenClaw TS Bridge listening on http://localhost:${PORT}`);
 });
+
+startFeishuLongConnection(handleParsedRequirement);
 
 export default app;

@@ -2,7 +2,7 @@
 
 ## Current Decision
 
-Introduce the OpenClaw gateway deployment pattern into this project as the Feishu entrypoint, and keep this repository's custom pipeline as a backend execution capability.
+Introduce the Feishu long-connection deployment pattern into this project as the entrypoint, and keep this repository's custom pipeline as the backend execution capability.
 
 Do not delete or abandon the custom pipeline yet. It already contains useful work around task decomposition, worker isolation, patch aggregation, review, PR creation, CI polling, debug retries, permission checks, and telemetry. The gateway should solve ingress/session problems first; this pipeline can remain available for feature-to-PR execution.
 
@@ -10,17 +10,25 @@ Do not delete or abandon the custom pipeline yet. It already contains useful wor
 
 The direct Feishu webhook in this repository was deployed on `http://10.48.0.81:3001/feishu/webhook`, but Feishu could not reach that private network address from the public platform. The webhook implementation now returns valid JSON for URL verification, but the network topology still blocks developer-server callbacks.
 
-The sibling `myopenclaw` project provides the reference deployment pattern: run the official OpenClaw gateway and use Feishu long connection mode. We should bring that pattern into this repository instead of relying on the sibling project's running gateway instance.
+The sibling `myopenclaw` project provides the reference deployment pattern: use Feishu long connection mode to avoid public webhook callbacks. This repository now owns that long-connection entrypoint in its TypeScript bridge so inbound messages can go directly into the custom pipeline.
 
 ## System Boundary
 
-### Project OpenClaw Gateway Deployment
+### Project Feishu Long-Connection Deployment
 
 Reference pattern: `D:\code\myopenclaw`
 
 Current project server path: `/home/zy/code/patchpilot`
 
-Important service:
+Primary service:
+
+- Docker service name: `openclaw`
+- container name: `openclaw`
+- external port: `3001`
+- role: TypeScript bridge plus Python feature-to-PR pipeline
+- Feishu mode: long connection, enabled by `FEISHU_LONG_CONNECTION_ENABLED=true`
+
+Optional service:
 
 - `openclaw-gateway`
 - image: `ghcr.io/openclaw/openclaw:latest`
@@ -28,18 +36,19 @@ Important service:
 - external port: `18790`
 - internal port: `18789`
 - health endpoint: `/healthz`
-- Feishu mode: long connection
+- Docker Compose profile: `official-gateway`
 
-Gateway responsibility:
+Current entrypoint responsibility:
 
 - Feishu long connection
-- Chat/session entrypoint
-- User-facing agent gateway behavior
+- Convert Feishu message events into `ParsedRequirement`
+- Invoke the existing TypeScript bridge and Python pipeline
 - Avoiding public webhook callback setup
 
 Known setup work:
 
-- The project gateway needs its own channel configuration and model credentials.
+- The official OpenClaw gateway can remain available for reference or later experiments.
+- Do not route production Feishu messages to the official gateway's built-in agent until model credentials and a clean pipeline handoff are designed.
 - Do not use the sibling `/home/gaoyu/source_code/myopenclaw` gateway as the production entrypoint for this project.
 
 ### Custom Pipeline In This Repository
@@ -67,7 +76,7 @@ Pipeline responsibility:
 - Create GitHub PRs
 - Poll CI and run debug retries
 
-This repository is not using official OpenClaw gateway internally. Its agent execution is driven by Python code and CLI subprocesses.
+This repository is not using the official OpenClaw gateway as the execution engine internally. Its agent execution is driven by Python code and CLI subprocesses.
 
 ## Current Architecture In This Repository
 
@@ -154,15 +163,11 @@ Recent architectural history:
 
 ## Recommended Next Steps
 
-1. Run this project's own OpenClaw gateway for Feishu ingress.
-2. Configure this gateway's Feishu long connection channel.
-3. Configure gateway model/API credentials so the long-connection agent can execute tasks.
-4. Keep the custom pipeline deployed but stop treating its Feishu webhook as the primary entrypoint.
-5. Decide how gateway should invoke the custom pipeline:
-   - direct HTTP call into the existing TypeScript bridge, or
-   - a small CLI/job wrapper around `pipeline.py`, or
-   - an OpenClaw/Hermes tool integration.
-6. Continue custom pipeline hardening:
+1. Run this project's `openclaw` service with `FEISHU_LONG_CONNECTION_ENABLED=true`.
+2. Keep Feishu configured in long connection mode.
+3. Stop the optional official `openclaw-gateway` Feishu consumer unless explicitly testing it.
+4. Verify an inbound Feishu message reaches `handleParsedRequirement()` and triggers `runPipeline()`.
+5. Continue custom pipeline hardening:
    - migrate remaining stages into `StageExecutor`,
    - make `SupervisorLoop` the main runner,
    - persist richer run state/checkpoints,
@@ -170,6 +175,6 @@ Recent architectural history:
 
 ## Current Operating Rule
 
-This project's own OpenClaw gateway is the preferred Feishu entrypoint.
+This project's own long-connection bridge is the preferred Feishu entrypoint.
 
 The custom pipeline is preserved as backend execution infrastructure and should not be removed unless a replacement exists for feature decomposition, patch generation, PR creation, CI polling, and debug retries.

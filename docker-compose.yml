@@ -9,6 +9,8 @@
 
 services:
   openclaw-gateway:
+    profiles:
+      - official-gateway
     image: ${OPENCLAW_GATEWAY_IMAGE:-ghcr.io/openclaw/openclaw:latest}
     container_name: patchpilot-openclaw-gateway
     restart: unless-stopped
@@ -38,6 +40,7 @@ services:
     environment:
       - PIPELINE_DIR=/opt/openclaw
       - PYTHON_BIN=python
+      - FEISHU_LONG_CONNECTION_ENABLED=${FEISHU_LONG_CONNECTION_ENABLED:-false}
     volumes:
       # Persistent workspace cache — speeds up subsequent pipeline runs
       - openclaw_workspaces:/tmp/openclaw-workspaces

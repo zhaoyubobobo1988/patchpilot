@@ -8,7 +8,8 @@ This is the **PatchPilot / OpenClaw-style AI Software Engineering System** — a
 
 Important current direction:
 
-- Add and use this project's own official OpenClaw gateway service as the Feishu long-connection entrypoint.
+- Use this project's TypeScript bridge as the Feishu long-connection entrypoint.
+- Keep the official OpenClaw gateway service optional behind the `official-gateway` Docker Compose profile for later experiments.
 - Treat the sibling `myopenclaw` repository as a deployment reference only, not as this project's production runtime.
 - Keep this repository's custom pipeline as backend execution infrastructure.
 - Do not delete or abandon the custom pipeline unless a replacement exists for task decomposition, patch generation, PR creation, CI polling, and debug retries.
@@ -29,9 +30,7 @@ Do not store SSH passwords or other secrets in this repository. Use an SSH key o
 ```
 Feishu Requirement Input
         ↓
-Project OpenClaw gateway long connection
-        ↓
-Gateway-to-pipeline integration   ← next design step
+Project TypeScript bridge long connection
         ↓
 Custom pipeline in this repo
         ↓
