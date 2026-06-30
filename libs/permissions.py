@@ -21,6 +21,8 @@ import os
 # ── constants ────────────────────────────────────────────────────────────────
 
 ALLOWED_PREFIX: str = "features/"
+ALLOWED_DOC_PREFIX: str = "docs/"
+ALLOWED_ROOT_FILES: tuple[str, ...] = ("README.md",)
 
 PROTECTED_PREFIXES: tuple[str, ...] = ("core/", "infra/")
 
@@ -52,6 +54,8 @@ class PermissionChecker:
     """
 
     ALLOWED_PREFIX = ALLOWED_PREFIX
+    ALLOWED_DOC_PREFIX = ALLOWED_DOC_PREFIX
+    ALLOWED_ROOT_FILES = ALLOWED_ROOT_FILES
     PROTECTED_PREFIXES = PROTECTED_PREFIXES
     CI_PATTERNS = CI_PATTERNS
 
@@ -77,11 +81,15 @@ class PermissionChecker:
 
     @staticmethod
     def is_within_allowed_scope(path: str) -> bool:
-        """Check whether *path* (after normalization) falls under features/."""
+        """Check whether *path* (after normalization) is in an allowed area."""
         normalized = PermissionChecker.normalize_path(path)
         if not normalized or normalized == ".":
             return False
-        return normalized.startswith(PermissionChecker.ALLOWED_PREFIX)
+        return (
+            normalized.startswith(PermissionChecker.ALLOWED_PREFIX)
+            or normalized.startswith(PermissionChecker.ALLOWED_DOC_PREFIX)
+            or normalized in PermissionChecker.ALLOWED_ROOT_FILES
+        )
 
     @staticmethod
     def is_protected(path: str) -> bool:

@@ -21,6 +21,7 @@ diff --git a/... b/...
 ## Allowed Operations
 - Create new files under /features/**
 - Modify existing feature files
+- For documentation-only tasks, modify README.md or files under /docs/**
 - Add unit tests under feature scope
 
 ## Forbidden Operations

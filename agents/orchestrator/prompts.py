@@ -25,7 +25,8 @@ Return a JSON object with this exact structure:
 }
 
 ## Rules
-- All file paths MUST be under /features/**
+- Code feature files should stay under /features/**
+- Documentation-only tasks may modify README.md or files under /docs/**
 - Keep subtasks small and focused (one concern per subtask)
 - Group subtasks that can run in parallel in the same parallel_group
 - dependent subtasks must be in later groups
@@ -39,4 +40,5 @@ def build_orchestrator_prompt(raw_requirement: str, repository: str) -> str:
 Feature Requirement:
 {raw_requirement}
 
-Decompose this into a task graph. Remember all file paths must be under /features/."""
+Decompose this into a task graph. Code feature files should stay under /features/.
+For documentation-only requests, use the real documentation path such as README.md or docs/..."""

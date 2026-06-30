@@ -65,7 +65,7 @@ def _build_context(run_id: str, task: FeatureTask, model: str) -> AgentContext:
     )
 
 
-def _clone_repo(workspace_path: str, repository: str) -> None:
+def _clone_repo(workspace_path: str, repository: str, base_branch: str = "main") -> None:
     """把目标仓库 clone 到 workspace（已存在则跳过）。"""
     import subprocess as _sp
     ws = Path(workspace_path)
@@ -76,6 +76,8 @@ def _clone_repo(workspace_path: str, repository: str) -> None:
         f"@github.com/{repository}.git"
     )
     _sp.run(["git", "clone", clone_url, str(ws)], check=True)
+    _sp.run(["git", "fetch", "origin", base_branch], cwd=ws, check=True)
+    _sp.run(["git", "checkout", "-B", base_branch, f"origin/{base_branch}"], cwd=ws, check=True)
     _sp.run(["git", "config", "user.email", "openclaw@noreply.github.com"], cwd=ws, check=True)
     _sp.run(["git", "config", "user.name", "OpenClaw"], cwd=ws, check=True)
     logger.info(f"Cloned {repository} → {workspace_path}")
@@ -276,7 +278,7 @@ async def run_pipeline(
     run.stage = "clone"
     save_run_state(run, settings.WORKSPACE_BASE_PATH)
     logger.info(f"[{run_id}] Stage: clone  {repository}")
-    _clone_repo(ctx.workspace_path, repository)
+    _clone_repo(ctx.workspace_path, repository, base_branch=task.base_branch)
 
     # ── Preflight: workspace strategy check ──────────────────────────────────────
     # validate_strategy does NOT create anything — read-only git checks only.

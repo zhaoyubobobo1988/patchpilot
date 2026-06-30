@@ -86,6 +86,16 @@ def test_scope_allows_nested_features():
     assert PermissionChecker.is_within_allowed_scope("features/auth/sub/nested.py") is True
 
 
+def test_scope_allows_root_readme():
+    from libs.permissions import PermissionChecker
+    assert PermissionChecker.is_within_allowed_scope("README.md") is True
+
+
+def test_scope_allows_docs_prefix():
+    from libs.permissions import PermissionChecker
+    assert PermissionChecker.is_within_allowed_scope("docs/architecture.md") is True
+
+
 def test_scope_rejects_core():
     from libs.permissions import PermissionChecker
     assert PermissionChecker.is_within_allowed_scope("core/auth.py") is False
@@ -262,6 +272,22 @@ def test_extract_ignores_non_diff_lines():
 def test_validate_diff_all_features_passes():
     from libs.permissions import PermissionChecker
     diff = "diff --git a/features/auth.py b/features/auth.py\n+code\n"
+    is_valid, violations = PermissionChecker.validate_diff(diff)
+    assert is_valid is True
+    assert violations == []
+
+
+def test_validate_diff_readme_passes():
+    from libs.permissions import PermissionChecker
+    diff = "diff --git a/README.md b/README.md\n+project notes\n"
+    is_valid, violations = PermissionChecker.validate_diff(diff)
+    assert is_valid is True
+    assert violations == []
+
+
+def test_validate_diff_docs_passes():
+    from libs.permissions import PermissionChecker
+    diff = "diff --git a/docs/usage.md b/docs/usage.md\n+usage notes\n"
     is_valid, violations = PermissionChecker.validate_diff(diff)
     assert is_valid is True
     assert violations == []
