@@ -13,6 +13,9 @@ services:
     container_name: patchpilot-openclaw-gateway
     restart: unless-stopped
     command: openclaw gateway run --allow-unconfigured --password ${OPENCLAW_GATEWAY_PASSWORD:-localtest}
+    environment:
+      - FEISHU_APP_SECRET=${FEISHU_APP_SECRET:-}
+      - FEISHU_ENCRYPT_KEY=${FEISHU_ENCRYPT_KEY:-}
     ports:
       # Keep this distinct from the sibling myopenclaw gateway, which uses 18789.
       - "${OPENCLAW_GATEWAY_PORT:-18790}:18789"
