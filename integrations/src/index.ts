@@ -1,5 +1,5 @@
 import express from "express";
-import type { Request, Response } from "express";
+import type { NextFunction, Request, Response } from "express";
 import { getOctokit, parseRepo } from "./github/client.js";
 import { createPullRequest, getCIStatus } from "./github/pr.js";
 import {
@@ -11,7 +11,26 @@ import { runPipeline } from "./pipeline.js";
 import type { FeishuEvent } from "./feishu/types.js";
 
 const app = express();
+
+app.use("/feishu", (req: Request, _res: Response, next: NextFunction) => {
+  console.log(
+    `[Feishu] ${req.method} ${req.originalUrl} from ${req.ip} content-type=${req.headers["content-type"] ?? ""}`,
+  );
+  next();
+});
+
 app.use(express.json());
+app.use(
+  (err: unknown, req: Request, res: Response, next: NextFunction) => {
+    if (err instanceof SyntaxError && req.path.startsWith("/feishu/")) {
+      console.warn(`[Feishu] Invalid JSON body: ${err.message}`);
+      res.status(400).json({ error: "invalid_json" });
+      return;
+    }
+
+    next(err);
+  },
+);
 
 const PORT = parseInt(process.env.TS_BRIDGE_PORT ?? "3001", 10);
 
@@ -162,6 +181,13 @@ app.post("/feishu/webhook", async (req: Request, res: Response) => {
   } finally {
     running.delete(parsed.chatId);
   }
+});
+
+app.all("/feishu/webhook", (req: Request, res: Response) => {
+  res.status(405).json({
+    error: "method_not_allowed",
+    method: req.method,
+  });
 });
 
 // ─── Health check ─────────────────────────────────────────────────────────────
