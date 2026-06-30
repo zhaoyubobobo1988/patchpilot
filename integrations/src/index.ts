@@ -83,11 +83,20 @@ app.post("/github/close-pr", async (req: Request, res: Response) => {
 
 // Track in-flight pipelines to avoid duplicate runs
 const running = new Set<string>();
+const activeMessages = new Set<string>();
+const recentMessages = new Set<string>();
+const MESSAGE_DEDUP_TTL_MS = 10 * 60 * 1000;
 
 export async function handleParsedRequirement(
   parsed: ParsedRequirement,
 ): Promise<void> {
+  if (isDuplicateMessage(parsed.messageId)) {
+    console.log(`[Feishu] Duplicate message ignored: ${parsed.messageId}`);
+    return;
+  }
+
   if (running.has(parsed.chatId)) {
+    rememberMessage(parsed.messageId);
     await sendTextMessage(
       parsed.chatId,
       "上一个需求仍在处理中，请等待完成后再提交新需求。",
@@ -96,6 +105,7 @@ export async function handleParsedRequirement(
   }
 
   running.add(parsed.chatId);
+  activeMessages.add(parsed.messageId);
   console.log(
     `[Feishu] New requirement from ${parsed.senderOpenId}: ${parsed.text.slice(0, 80)}`,
   );
@@ -159,7 +169,25 @@ export async function handleParsedRequirement(
     );
   } finally {
     running.delete(parsed.chatId);
+    activeMessages.delete(parsed.messageId);
+    rememberMessage(parsed.messageId);
   }
+}
+
+function isDuplicateMessage(messageId: string): boolean {
+  return activeMessages.has(messageId) || recentMessages.has(messageId);
+}
+
+function rememberMessage(messageId: string): void {
+  if (!messageId || recentMessages.has(messageId)) {
+    return;
+  }
+
+  recentMessages.add(messageId);
+  const timer = setTimeout(() => {
+    recentMessages.delete(messageId);
+  }, MESSAGE_DEDUP_TTL_MS);
+  timer.unref?.();
 }
 
 app.post("/feishu/webhook", async (req: Request, res: Response) => {

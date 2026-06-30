@@ -31,7 +31,9 @@ export function startFeishuLongConnection(handler: RequirementHandler): void {
         return;
       }
 
-      await handler(parsed);
+      void handler(parsed).catch((err: unknown) => {
+        console.error("[Feishu] Long connection handler error:", err);
+      });
     },
   });
 

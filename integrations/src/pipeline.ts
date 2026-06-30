@@ -76,6 +76,10 @@ export function runPipeline(
       if (code === 0 && prUrl) {
         resolve({ success: true, runId, prUrl, ciPassed: ciPassed === "True" });
       } else if (code === 0) {
+        console.error(
+          "[Pipeline] Finished without PR URL:",
+          redact(combined).slice(-1600),
+        );
         resolve({
           success: false,
           runId,
@@ -83,6 +87,7 @@ export function runPipeline(
         });
       } else {
         const snippet = (stderr || stdout).slice(-800);
+        console.error("[Pipeline] Failed:", redact(stderr || stdout).slice(-1600));
         resolve({
           success: false,
           runId,
@@ -103,4 +108,10 @@ function normalizeField(value: string | undefined): string | undefined {
     return undefined;
   }
   return value;
+}
+
+function redact(text: string): string {
+  return text
+    .replace(/ghp_[A-Za-z0-9_]+/g, "[REDACTED_GITHUB_TOKEN]")
+    .replace(/oauth2:[^@\s]+@github\.com/g, "oauth2:[REDACTED]@github.com");
 }
