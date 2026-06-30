@@ -13,6 +13,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import re
+import subprocess as _sp
+import time
 import uuid
 from pathlib import Path
 
@@ -43,6 +45,10 @@ logger = get_logger(__name__)
 _MAX_REVIEW_RETRIES = 2
 
 
+def _redact_secret(text: str) -> str:
+    return re.sub(r"oauth2:[^@\s]+@", "oauth2:[REDACTED]@", text)
+
+
 def _make_run_id() -> str:
     return str(uuid.uuid4()).replace("-", "")[:12]
 
@@ -67,7 +73,6 @@ def _build_context(run_id: str, task: FeatureTask, model: str) -> AgentContext:
 
 def _clone_repo(workspace_path: str, repository: str, base_branch: str = "main") -> None:
     """把目标仓库 clone 到 workspace（已存在则跳过）。"""
-    import subprocess as _sp
     ws = Path(workspace_path)
     if (ws / ".git").exists():
         return
@@ -75,12 +80,39 @@ def _clone_repo(workspace_path: str, repository: str, base_branch: str = "main")
         f"https://oauth2:{settings.GITHUB_TOKEN}"
         f"@github.com/{repository}.git"
     )
-    _sp.run(["git", "clone", clone_url, str(ws)], check=True)
-    _sp.run(["git", "fetch", "origin", base_branch], cwd=ws, check=True)
-    _sp.run(["git", "checkout", "-B", base_branch, f"origin/{base_branch}"], cwd=ws, check=True)
-    _sp.run(["git", "config", "user.email", "openclaw@noreply.github.com"], cwd=ws, check=True)
-    _sp.run(["git", "config", "user.name", "OpenClaw"], cwd=ws, check=True)
+    _run_git(["clone", clone_url, str(ws)], retries=2)
+    _run_git(["fetch", "origin", base_branch], cwd=ws, retries=2)
+    _run_git(["checkout", "-B", base_branch, f"origin/{base_branch}"], cwd=ws)
+    _run_git(["config", "user.email", "openclaw@noreply.github.com"], cwd=ws)
+    _run_git(["config", "user.name", "OpenClaw"], cwd=ws)
     logger.info(f"Cloned {repository} → {workspace_path}")
+
+
+def _run_git(args: list[str], cwd: Path | None = None, retries: int = 0) -> str:
+    last_error = ""
+    for attempt in range(retries + 1):
+        result = _sp.run(
+            ["git", *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+
+        output = (result.stderr or result.stdout or "").strip()
+        last_error = _redact_secret(output)
+        if attempt < retries:
+            time.sleep(1 + attempt)
+            continue
+
+    safe_args = [_redact_secret(part) for part in args]
+    raise RuntimeError(
+        f"git {' '.join(safe_args)} failed after {retries + 1} attempt(s): "
+        f"{last_error[:1000]}"
+    )
 
 
 def _record_pipeline_completed(run: "PipelineRun", run_id: str) -> None:

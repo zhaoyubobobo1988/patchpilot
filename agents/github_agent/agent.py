@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -279,9 +280,19 @@ class GitHubAgent:
             text=True,
             encoding="utf-8",
             errors="replace",
-            check=True,
         )
+        if result.returncode != 0:
+            safe_args = [self._redact_secret(part) for part in args]
+            output = (result.stderr or result.stdout or "").strip()
+            raise RuntimeError(
+                f"git {' '.join(safe_args)} failed: "
+                f"{self._redact_secret(output)[:1000]}"
+            )
         return result.stdout.strip()
+
+    @staticmethod
+    def _redact_secret(text: str) -> str:
+        return re.sub(r"oauth2:[^@\s]+@", "oauth2:[REDACTED]@", text)
 
     def _build_pr_body(self, task: FeatureTask, merged_patch: MergedPatch) -> str:
         subtask_lines = "\n".join(f"- [{st.id}] {st.goal}" for st in task.subtasks)
