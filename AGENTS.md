@@ -4,7 +4,14 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ## Project Overview
 
-This is the **OpenClaw AI Software Engineering System** — a multi-agent pipeline that converts natural language feature requirements into GitHub Pull Requests via patch-based code generation.
+This is the **PatchPilot / OpenClaw-style AI Software Engineering System** — a custom multi-stage pipeline that converts natural language feature requirements into GitHub Pull Requests via patch-based code generation.
+
+Important current direction:
+
+- Use the sibling `myopenclaw` deployment's official OpenClaw gateway as the Feishu long-connection entrypoint.
+- Keep this repository's custom pipeline as backend execution infrastructure.
+- Do not delete or abandon the custom pipeline unless a replacement exists for task decomposition, patch generation, PR creation, CI polling, and debug retries.
+- See `docs/project-development-status.md` and `docs/decisions/ADR-001-gateway-entrypoint-custom-pipeline-backend.md`.
 
 ## Deployment Notes
 
@@ -16,18 +23,38 @@ This project is deployed on a server reachable over SSH:
 
 Do not store SSH passwords or other secrets in this repository. Use an SSH key or an external secret manager when possible.
 
-## Pipeline Architecture
+## Current Integration Route
 
 ```
 Feishu Requirement Input
         ↓
-OpenClaw Orchestrator (task decomposition + scheduling)
+OpenClaw gateway long connection  ← sibling myopenclaw deployment
         ↓
-Planner Agent (Codex)
+Gateway-to-pipeline integration   ← next design step
         ↓
-Parallel Codex Workers  ← this repo
+Custom pipeline in this repo
+        ↓
+GitHub Pull Request
+```
+
+The direct Feishu developer-server webhook in this repository is not the preferred production entrypoint because `10.48.0.81` is a private address. It can remain useful for local/internal testing.
+
+## Custom Pipeline Architecture
+
+```
+Requirement Input
+        ↓
+Context Agent (repository analysis)
+        ↓
+Orchestrator Agent (task decomposition + scheduling)
+        ↓
+TaskGraph (parallel groups + dependencies)
+        ↓
+Parallel Claude/Codex Workers
         ↓
 Aggregator Agent (merge patches)
+        ↓
+Review Agent
         ↓
 GitHub Agent (create PR)
         ↓
@@ -85,3 +112,10 @@ diff --git a/features/... b/features/...
 ## Multi-Agent Coordination
 
 Multiple workers run in parallel and an Aggregator merges outputs. Keep changes **localized and additive** — avoid overlapping file regions and global refactoring. CI failures trigger a Debug Agent retry loop (max 5 retries).
+
+This repository has partial state-machine infrastructure:
+
+- `models/task.py` defines `TaskGraph` for parallel groups and dependencies.
+- `pipeline_stages.py` defines `StageExecutor` and early concrete stages.
+- `supervisor.py` defines `SupervisorLoop` with `CONTINUE`, `RETRY`, and `ABORT`.
+- `pipeline.py` has not yet been fully migrated to `SupervisorLoop`; that is a future hardening step.
