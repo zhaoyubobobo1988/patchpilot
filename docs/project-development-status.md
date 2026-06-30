@@ -2,7 +2,7 @@
 
 ## Current Decision
 
-Use the existing OpenClaw gateway deployment as the Feishu entrypoint, and keep this repository's custom pipeline as a backend execution capability.
+Introduce the OpenClaw gateway deployment pattern into this project as the Feishu entrypoint, and keep this repository's custom pipeline as a backend execution capability.
 
 Do not delete or abandon the custom pipeline yet. It already contains useful work around task decomposition, worker isolation, patch aggregation, review, PR creation, CI polling, debug retries, permission checks, and telemetry. The gateway should solve ingress/session problems first; this pipeline can remain available for feature-to-PR execution.
 
@@ -10,21 +10,23 @@ Do not delete or abandon the custom pipeline yet. It already contains useful wor
 
 The direct Feishu webhook in this repository was deployed on `http://10.48.0.81:3001/feishu/webhook`, but Feishu could not reach that private network address from the public platform. The webhook implementation now returns valid JSON for URL verification, but the network topology still blocks developer-server callbacks.
 
-The sibling `myopenclaw` deployment already runs the official OpenClaw gateway and supports Feishu long connection mode. In Feishu Open Platform, long connection verification now shows connected. That route avoids public webhook and HTTPS exposure work.
+The sibling `myopenclaw` project provides the reference deployment pattern: run the official OpenClaw gateway and use Feishu long connection mode. We should bring that pattern into this repository instead of relying on the sibling project's running gateway instance.
 
 ## System Boundary
 
-### OpenClaw Gateway Deployment
+### Project OpenClaw Gateway Deployment
 
-Reference project: `D:\code\myopenclaw`
+Reference pattern: `D:\code\myopenclaw`
 
-Server path: `/home/gaoyu/source_code/myopenclaw`
+Current project server path: `/home/zy/code/patchpilot`
 
 Important service:
 
 - `openclaw-gateway`
 - image: `ghcr.io/openclaw/openclaw:latest`
-- port: `18789`
+- container name: `patchpilot-openclaw-gateway`
+- external port: `18790`
+- internal port: `18789`
 - health endpoint: `/healthz`
 - Feishu mode: long connection
 
@@ -35,11 +37,10 @@ Gateway responsibility:
 - User-facing agent gateway behavior
 - Avoiding public webhook callback setup
 
-Known current issue:
+Known setup work:
 
-- Logs show missing OpenAI provider auth for the default gateway agent:
-  `No API key found for provider "openai"`.
-- The gateway can connect, but model credentials still need to be configured before it can reliably handle tasks.
+- The project gateway needs its own channel configuration and model credentials.
+- Do not use the sibling `/home/gaoyu/source_code/myopenclaw` gateway as the production entrypoint for this project.
 
 ### Custom Pipeline In This Repository
 
@@ -153,14 +154,15 @@ Recent architectural history:
 
 ## Recommended Next Steps
 
-1. Use OpenClaw gateway for Feishu ingress.
-2. Configure gateway model/API credentials so the long-connection agent can execute tasks.
-3. Keep the custom pipeline deployed but stop treating its Feishu webhook as the primary entrypoint.
-4. Decide how gateway should invoke the custom pipeline:
+1. Run this project's own OpenClaw gateway for Feishu ingress.
+2. Configure this gateway's Feishu long connection channel.
+3. Configure gateway model/API credentials so the long-connection agent can execute tasks.
+4. Keep the custom pipeline deployed but stop treating its Feishu webhook as the primary entrypoint.
+5. Decide how gateway should invoke the custom pipeline:
    - direct HTTP call into the existing TypeScript bridge, or
    - a small CLI/job wrapper around `pipeline.py`, or
    - an OpenClaw/Hermes tool integration.
-5. Continue custom pipeline hardening:
+6. Continue custom pipeline hardening:
    - migrate remaining stages into `StageExecutor`,
    - make `SupervisorLoop` the main runner,
    - persist richer run state/checkpoints,
@@ -168,6 +170,6 @@ Recent architectural history:
 
 ## Current Operating Rule
 
-OpenClaw gateway is the preferred Feishu entrypoint.
+This project's own OpenClaw gateway is the preferred Feishu entrypoint.
 
 The custom pipeline is preserved as backend execution infrastructure and should not be removed unless a replacement exists for feature decomposition, patch generation, PR creation, CI polling, and debug retries.

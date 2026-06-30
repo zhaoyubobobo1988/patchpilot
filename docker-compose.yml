@@ -2,12 +2,28 @@
 # OpenClaw — Production deployment
 # =============================================================================
 # Usage:
-#   1. Copy .env.example → .env and fill in API keys + Feishu credentials
+#   1. Copy .env.example → .env and fill in API keys + credentials
 #   2. docker compose up -d
-#   3. Configure Feishu bot webhook URL: http://<your-server>:3001/feishu/webhook
+#   3. Configure Feishu long connection in the project OpenClaw gateway
 # =============================================================================
 
 services:
+  openclaw-gateway:
+    image: ${OPENCLAW_GATEWAY_IMAGE:-ghcr.io/openclaw/openclaw:latest}
+    container_name: patchpilot-openclaw-gateway
+    restart: unless-stopped
+    command: openclaw gateway run --allow-unconfigured --password ${OPENCLAW_GATEWAY_PASSWORD:-localtest}
+    ports:
+      # Keep this distinct from the sibling myopenclaw gateway, which uses 18789.
+      - "${OPENCLAW_GATEWAY_PORT:-18790}:18789"
+    volumes:
+      - openclaw_gateway_data:/home/node/.openclaw
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:18789/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   openclaw:
     build: .
     container_name: openclaw
@@ -26,4 +42,5 @@ services:
       # - ~/.gitconfig:/home/openclaw/.gitconfig:ro
 
 volumes:
+  openclaw_gateway_data:
   openclaw_workspaces:
