@@ -4,6 +4,7 @@ import asyncio
 import re
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 import httpx
@@ -66,7 +67,7 @@ class GitHubAgent:
             f"https://oauth2:{settings.GITHUB_TOKEN}"
             f"@github.com/{task.repository}.git"
         )
-        self._git(workspace, ["push", remote_url, branch])
+        self._git(workspace, ["push", remote_url, branch], retries=2)
 
         return PRRequest(
             repository=task.repository,
@@ -272,23 +273,34 @@ class GitHubAgent:
             "X-GitHub-Api-Version": "2022-11-28",
         }
 
-    def _git(self, cwd: Path, args: list[str]) -> str:
-        result = subprocess.run(
-            ["git", *args],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-        if result.returncode != 0:
-            safe_args = [self._redact_secret(part) for part in args]
-            output = (result.stderr or result.stdout or "").strip()
-            raise RuntimeError(
-                f"git {' '.join(safe_args)} failed: "
-                f"{self._redact_secret(output)[:1000]}"
+    def _git(self, cwd: Path, args: list[str], retries: int = 0) -> str:
+        safe_args = [self._redact_secret(part) for part in args]
+        last_output = ""
+        for attempt in range(retries + 1):
+            result = subprocess.run(
+                ["git", *args],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
             )
-        return result.stdout.strip()
+            if result.returncode == 0:
+                return result.stdout.strip()
+
+            output = (result.stderr or result.stdout or "").strip()
+            last_output = self._redact_secret(output)
+            if attempt < retries:
+                logger.warning(
+                    f"git {' '.join(safe_args)} failed on attempt "
+                    f"{attempt + 1}/{retries + 1}: {last_output[:300]}"
+                )
+                time.sleep(1 + attempt)
+
+        raise RuntimeError(
+            f"git {' '.join(safe_args)} failed after {retries + 1} attempt(s): "
+            f"{last_output[:1000]}"
+        )
 
     @staticmethod
     def _redact_secret(text: str) -> str:
