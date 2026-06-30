@@ -3,7 +3,7 @@ import type { Request, Response } from "express";
 import { getOctokit, parseRepo } from "./github/client.js";
 import { createPullRequest, getCIStatus } from "./github/pr.js";
 import {
-  isUrlVerification,
+  parseUrlVerification,
   parseFeishuEvent,
 } from "./feishu/webhook.js";
 import { sendTextMessage } from "./feishu/client.js";
@@ -68,8 +68,9 @@ app.post("/feishu/webhook", async (req: Request, res: Response) => {
   const body = req.body;
 
   // 1. URL verification handshake (Feishu event subscription)
-  if (isUrlVerification(body)) {
-    res.json({ challenge: body.challenge });
+  const challenge = parseUrlVerification(body);
+  if (challenge) {
+    res.json({ challenge });
     return;
   }
 

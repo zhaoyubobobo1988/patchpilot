@@ -2,21 +2,37 @@
  * Feishu webhook helpers — URL verification + message parsing.
  */
 import type {
-  FeishuChallenge,
   FeishuEvent,
   ParsedRequirement,
 } from "./types.js";
 
 // ── URL verification ─────────────────────────────────────────────────────────
 
-export function isUrlVerification(
-  body: unknown,
-): body is FeishuChallenge {
-  return (
-    typeof body === "object" &&
-    body !== null &&
-    (body as FeishuChallenge).type === "url_verification"
-  );
+export function parseUrlVerification(body: unknown): string | null {
+  if (typeof body !== "object" || body === null) return null;
+
+  const payload = body as {
+    type?: unknown;
+    challenge?: unknown;
+    header?: { event_type?: unknown };
+    event?: { challenge?: unknown };
+  };
+
+  if (
+    payload.type === "url_verification" &&
+    typeof payload.challenge === "string"
+  ) {
+    return payload.challenge;
+  }
+
+  if (
+    payload.header?.event_type === "url_verification" &&
+    typeof payload.event?.challenge === "string"
+  ) {
+    return payload.event.challenge;
+  }
+
+  return null;
 }
 
 // ── Message parsing ──────────────────────────────────────────────────────────
@@ -32,6 +48,7 @@ export function parseFeishuEvent(
   if (!ev) return null;
 
   const { message, sender } = ev;
+  if (!message || !sender) return null;
   if (message.message_type !== "text") return null;
 
   let text = "";

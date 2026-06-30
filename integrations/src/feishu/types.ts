@@ -25,8 +25,9 @@ export interface FeishuEvent {
   schema: string;
   header: FeishuEventHeader;
   event: {
-    sender: FeishuSender;
-    message: FeishuMessage;
+    challenge?: string;
+    sender?: FeishuSender;
+    message?: FeishuMessage;
   };
 }
 
